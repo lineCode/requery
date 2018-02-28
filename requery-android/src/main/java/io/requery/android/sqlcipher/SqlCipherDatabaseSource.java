@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 requery.io
+ * Copyright 2017 requery.io
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -114,6 +114,11 @@ public class SqlCipherDatabaseSource extends SQLiteOpenHelper implements
 
     @Override
     public void onConfigure(SQLiteDatabase db) {
+    }
+
+    @Override
+    public void onOpen(SQLiteDatabase db) {
+        super.onOpen(db);
         if (!db.isReadOnly()) {
             db.execSQL("PRAGMA foreign_keys = ON");
         }

@@ -16,6 +16,8 @@
 
 package io.requery.sql;
 
+import io.requery.TransactionListener;
+import io.requery.meta.Type;
 import io.requery.query.Expression;
 import io.requery.query.MutableTuple;
 import io.requery.query.NamedExpression;
@@ -73,6 +75,9 @@ class InsertReturningOperation extends PreparedQueryOperation implements
         BoundParameters parameters = generator.parameters();
         int count;
         PreparedStatement statement = null;
+        Set<Type<?>> types = query.entityTypes();
+        TransactionListener transactionListener = new CompositeTransactionListener(
+                configuration.getTransactionListenerFactories());
         try {
             Connection connection = configuration.getConnection();
             StatementListener listener = configuration.getStatementListener();
@@ -82,14 +87,20 @@ class InsertReturningOperation extends PreparedQueryOperation implements
                 statement = prepare(sql, connection);
             }
             mapParameters(statement, parameters);
+
             listener.beforeExecuteUpdate(statement, sql, parameters);
+            transactionListener.beforeCommit(types);
+
             count = statement.executeUpdate();
+
             listener.afterExecuteUpdate(statement, count);
+            transactionListener.afterCommit(types);
+
             if (selection == null || selection.isEmpty() || query.insertType() == InsertType.SELECT) {
                 connection.close();
                 MutableTuple tuple = new MutableTuple(1);
                 tuple.set(0, NamedExpression.ofInteger("count"), count);
-                return new SingleResult<Tuple>(tuple);
+                return new CollectionResult<Tuple>(tuple);
             } else {
                 ResultSet results = statement.getGeneratedKeys();
                 return new GeneratedKeyResult(configuration, selection, connection, results, count);

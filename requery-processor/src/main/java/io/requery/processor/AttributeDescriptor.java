@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 requery.io
+ * Copyright 2017 requery.io
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,14 @@ interface AttributeDescriptor {
      * @return name of the attribute used in the mapping operations
      */
     String name();
+
+    enum Type {
+        DEFAULT,
+        STRING,
+        NUMERIC
+    }
+
+    Type getType();
 
     /**
      * @return the type of builder used to construct the attribute in the generated code
@@ -202,6 +210,11 @@ interface AttributeDescriptor {
      * for associative attributes
      */
     String mappedBy();
+
+    /**
+     * @return Class name compatible with java.lang.Optional (e.g. Guava)
+     */
+    String optionalClass();
 
     /**
      * @return optional in a relational attribute the column use to order the generated query by.

@@ -1,6 +1,50 @@
 Change Log
 ==========
 
+## 1.5.0
+
+- Deprecates RxJava 1.0 support in order to bring improvements to RxJava 2.0 support in a future version
+- Default indexes now include table name in the index name
+- Support setting generated member visibility (for removing synthetic accessors)
+- Support package private code generation for reduced method count on Android
+- Fix NoSuchElementException during table generation of an entity with no keys
+- Fix Android proguard rules
+- Fix EntityDataStore synchronization that could dead lock
+- Fix inserting empty collection returning null key set
+- Fix Kotlin ClassCastException when using long/int key types in the insert returning query
+- Fix CloseableIterator accumulation when using Result functions
+- Fix Connection not closed when exception thrown from a raw query 
+
+## 1.4.1
+
+- Support accessing the Configuration instance from EntityDataStore
+- Support setting generated member visibility (for removing synthetic accessors)
+- Support accessing Transaction instance from KotlinReactiveEntityStore
+- PostgresSQL store blobs as bytea
+- Fix foreign key support in Android sqlcipher/sqlite-support
+- Fix stack overflow on bi-directional attributes in EnityProxy.toString
+- Fix references cascaded even if Cascade.NONE specified
+- Fix NoSuchMethodError when converting a entity with @Embedded types to json
+- Fix Observables not triggered for insert operations 
+- Fix @Transient annotation not applied to methods
+- Fix @Transient members were checked for reserved works
+- Fix Connection instance not closed on transaction rollback
+
+## 1.4.0
+
+- Support item view types in Android RecyclerView adapter
+- Support withTransaction overloads for Kotlin entity stores
+- Support guava/streamsupport Optional types
+- Rx support transaction methods modified to update in a more expected way
+- Fix default value usage in inserts
+- Fix aliased expression not usable in orderby clause
+- Fix collection getters not used in Jackson serialization
+- Fix collection modification behavior
+- Fix cases where duplicate entity attributes would be generated
+- Fix MutableResult not usable in an entity definition 
+- Fix Android unique column not being able to be added in an upgrade
+- Fix Kotlin Update.set() method property support
+
 ## 1.3.2
 
 - Fix Rx observable changes not triggered for nested transactions

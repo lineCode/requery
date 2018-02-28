@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 requery.io
+ * Copyright 2017 requery.io
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import io.requery.android.database.sqlite.SQLiteOpenHelper;
 import io.requery.android.sqlite.DatabaseProvider;
 import io.requery.android.sqlite.SchemaUpdater;
 import io.requery.meta.EntityModel;
-import io.requery.sql.Configuration;
 import io.requery.sql.ConfigurationBuilder;
 import io.requery.sql.Mapping;
 import io.requery.sql.Platform;
@@ -59,7 +58,7 @@ public class SqlitexDatabaseSource extends SQLiteOpenHelper implements
     private final EntityModel model;
     private Mapping mapping;
     private SQLiteDatabase db;
-    private Configuration configuration;
+    private io.requery.sql.Configuration configuration;
     private boolean loggingEnabled;
     private TableCreationMode mode;
 
@@ -113,7 +112,7 @@ public class SqlitexDatabaseSource extends SQLiteOpenHelper implements
     }
 
     @Override
-    public Configuration getConfiguration() {
+    public io.requery.sql.Configuration getConfiguration() {
         if (mapping == null) {
             mapping = onCreateMapping(platform);
         }
@@ -135,6 +134,11 @@ public class SqlitexDatabaseSource extends SQLiteOpenHelper implements
     public void onCreate(SQLiteDatabase db) {
         this.db = db;
         new SchemaModifier(getConfiguration()).createTables(TableCreationMode.CREATE);
+    }
+
+    @Override
+    public void onConfigure(SQLiteDatabase db) {
+        db.setForeignKeyConstraintsEnabled(true);
     }
 
     @Override

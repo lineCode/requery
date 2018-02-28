@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 requery.io
+ * Copyright 2017 requery.io
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,8 @@ import io.requery.sql.Platform;
  */
 public class DefaultMapping extends GenericMapping {
     public DefaultMapping(Platform platform) {
-        super(platform);
+        super();
+        platform.addMappings(this);
         addConverter(new UriConverter());
     }
 }

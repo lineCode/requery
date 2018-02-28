@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 requery.io
+ * Copyright 2017 requery.io
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,6 +56,7 @@ import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.PrimitiveType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.ElementFilter;
@@ -107,6 +108,7 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
     private boolean isTransient;
     private boolean isUnique;
     private boolean isVersion;
+    private Type type;
     private Class<? extends AttributeBuilder> builderClass;
     private Integer length;
     private Set<String> indexNames;
@@ -122,6 +124,7 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
     private String defaultValue;
     private String definition;
     private String collate;
+    private String optionalClassName;
     private String orderByColumn;
     private Order orderByDirection;
     private AssociativeEntityDescriptor associativeDescriptor;
@@ -133,6 +136,7 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
         }
         this.entity = entity;
         this.indexNames = new LinkedHashSet<>();
+        this.type = Type.DEFAULT;
     }
 
     @Override
@@ -145,11 +149,13 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
         processBasicColumnAnnotations(validator);
         processAssociativeAnnotations(processingEnvironment, validator);
         processConverterAnnotation(validator);
-        checkMemberType(processingEnvironment, typeMirror(), validators);
+        checkMemberType(processingEnvironment, validators);
         if (cardinality() != null && entity.isImmutable()) {
             validator.error("Immutable value type cannot contain relational references");
         }
-        checkReserved(name(), validator);
+        if (!isTransient) {
+            checkReserved(name(), validator);
+        }
         isEmbedded = annotationOf(Embedded.class).isPresent() ||
             annotationOf(javax.persistence.Embedded.class).isPresent();
         indexNames.forEach(name -> checkReserved(name, validator));
@@ -171,13 +177,14 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
         }
     }
 
-    private void checkMemberType(ProcessingEnvironment processingEnvironment, TypeMirror type,
+    private void checkMemberType(ProcessingEnvironment processingEnvironment,
                                  Set<ElementValidator> validators) {
         builderClass = AttributeBuilder.class;
         Types types = processingEnvironment.getTypeUtils();
-        isBoolean = type.getKind() == TypeKind.BOOLEAN;
-        if (type.getKind() == TypeKind.DECLARED) {
-            TypeElement element = (TypeElement) types.asElement(type);
+        TypeMirror mirror = typeMirror();
+        isBoolean = mirror.getKind() == TypeKind.BOOLEAN;
+        if (mirror.getKind() == TypeKind.DECLARED) {
+            TypeElement element = (TypeElement) types.asElement(mirror);
             if (element != null) {
                 // only set if the attribute is relational
                 if (cardinality != null) {
@@ -187,7 +194,19 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
                 if (isMap && cardinality != null) {
                     builderClass = MapAttributeBuilder.class;
                 }
-                isOptional = Mirrors.isInstance(types, element, Optional.class);
+                // check for optional compatible types
+                String[] names = {
+                        Optional.class.getName(),
+                        "com.google.common.base.Optional",
+                        "java8.util.Optional"
+                };
+                for (String name : names) {
+                    if (Mirrors.isInstance(types, element, name)) {
+                        isOptional = true;
+                        optionalClassName = name;
+                        break;
+                    }
+                }
                 isBoolean = Mirrors.isInstance(types, element, Boolean.class);
             }
         }
@@ -195,6 +214,23 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
             ElementValidator validator = validateCollectionType(processingEnvironment);
             if (validator != null) {
                 validators.add(validator);
+            }
+        } else {
+            TypeElement element = null;
+            if (mirror.getKind().isPrimitive()) {
+                element = types.boxedClass((PrimitiveType) mirror);
+            } else if (mirror.getKind() == TypeKind.DECLARED) {
+                element = (TypeElement) types.asElement(mirror);
+            }
+
+            if (element != null) {
+                if (Mirrors.isInstance(types, element, Number.class)
+                    || Mirrors.isInstance(types, element, java.util.Date.class)
+                    || Mirrors.isInstance(types, element, java.time.temporal.Temporal.class)) {
+                    type = Type.NUMERIC;
+                } else if (Mirrors.isInstance(types, element, String.class)) {
+                    type = Type.STRING;
+                }
             }
         }
     }
@@ -537,6 +573,11 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
     }
 
     @Override
+    public Type getType() {
+        return type;
+    }
+
+    @Override
     public TypeMirror typeMirror() {
         if (element().getKind().isField()) {
             return element().asType();
@@ -789,6 +830,11 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
     }
 
     @Override
+    public String optionalClass() {
+        return optionalClassName;
+    }
+
+    @Override
     public String orderBy() {
         return orderByColumn;
     }
@@ -849,7 +895,8 @@ class AttributeMember extends BaseProcessableElement<Element> implements Attribu
             for (CascadeType type : types) {
                 switch (type) {
                     case ALL:
-                        actions.addAll(EnumSet.allOf(CascadeAction.class));
+                        actions.add(CascadeAction.SAVE);
+                        actions.add(CascadeAction.DELETE);
                     case PERSIST:
                         actions.add(CascadeAction.SAVE);
                         break;

@@ -17,21 +17,22 @@
 package io.requery.test.kt
 
 import io.requery.kotlin.*
-import io.requery.sql.*
+import io.requery.sql.KotlinConfiguration
+import io.requery.sql.KotlinEntityDataStore
+import io.requery.sql.SchemaModifier
+import io.requery.sql.TableCreationMode
 import org.h2.jdbcx.JdbcDataSource
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import java.net.URL
-import java.util.Calendar
-import java.util.Random
-import java.util.UUID
+import java.util.*
 
 class FunctionalTest {
 
-    var instance : KotlinEntityDataStore<Any>? = null
-    val data : KotlinEntityDataStore<Any> get() = instance!!
+    lateinit var instance : KotlinEntityDataStore<Any>
+    val data : KotlinEntityDataStore<Any> get() = instance
 
     companion object {
         fun randomPerson(): Person {
@@ -155,6 +156,27 @@ class FunctionalTest {
                 .orderBy(Address::city.desc())
                 .get()
         assertTrue(result.toList().size > 0)
+    }
+
+    @Test
+    fun testQueryRawEntity() {
+        val person = randomPerson()
+        data.insert(person)
+        // not a useful query just tests the sql output
+        val result = data.raw(Person::class, "SELECT * FROM person")
+        assertSame(result.first(), person)
+    }
+
+    @Test
+    fun testQueryUpdate() {
+        val person = randomPerson()
+        person.age = 100
+        data.insert(person)
+        val rowCount = data.update<Person>(Person::class)
+                .set(Person::about, "nothing")
+                .set(Person::age, 50)
+                .where(Person::age.eq(100)).get().value()
+        assertEquals(1, rowCount.toLong())
     }
 
     @After

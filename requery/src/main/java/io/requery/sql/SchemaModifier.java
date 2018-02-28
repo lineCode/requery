@@ -37,6 +37,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -93,7 +94,8 @@ public class SchemaModifier implements ConnectionProvider {
             platform = new PlatformDelegate(connection);
         }
         if (mapping == null) {
-            mapping = new GenericMapping(platform);
+            mapping = new GenericMapping();
+            platform.addMappings(mapping);
         }
         return connection;
     }
@@ -141,7 +143,9 @@ public class SchemaModifier implements ConnectionProvider {
         ArrayList<Type<?>> sorted = sortTypes();
         try (Statement statement = connection.createStatement()) {
             if (mode == TableCreationMode.DROP_CREATE) {
-                executeDropStatements(statement);
+                ArrayList<Type<?>> reversed = sortTypes();
+                Collections.reverse(reversed);
+                executeDropStatements(statement, reversed);
             }
             for (Type<?> type : sorted) {
                 String sql = tableCreateStatement(type, mode);
@@ -197,16 +201,28 @@ public class SchemaModifier implements ConnectionProvider {
     public void dropTables() {
         try (Connection connection = getConnection();
              Statement statement = connection.createStatement()) {
-            executeDropStatements(statement);
+            ArrayList<Type<?>> reversed = sortTypes();
+            Collections.reverse(reversed);
+            executeDropStatements(statement, reversed);
         } catch (SQLException e) {
             throw new TableModificationException(e);
         }
     }
 
-    private void executeDropStatements(Statement statement) throws SQLException {
-        ArrayList<Type<?>> reversed = sortTypes();
-        Collections.reverse(reversed);
-        for (Type<?> type : reversed) {
+    /**
+     * Drops a single table in the schema.
+     */
+    public void dropTable(Type<?> type) {
+        try (Connection connection = getConnection();
+             Statement statement = connection.createStatement()) {
+            executeDropStatements(statement, Collections.<Type<?>>singletonList(type));
+        } catch (SQLException e) {
+            throw new TableModificationException(e);
+        }
+    }
+
+    private void executeDropStatements(Statement statement, List<Type<?>> types) throws SQLException {
+        for (Type<?> type : types) {
             QueryBuilder qb = createQueryBuilder();
             qb.keyword(DROP, TABLE);
             if (platform.supportsIfExists()) {
@@ -249,6 +265,10 @@ public class SchemaModifier implements ConnectionProvider {
      * @param <T>        parent type of the attribute
      */
     public <T> void addColumn(Connection connection, Attribute<T, ?> attribute) {
+        addColumn(connection, attribute, true);
+    }
+
+    public <T> void addColumn(Connection connection, Attribute<T, ?> attribute, boolean inlineUnique) {
         Type<T> type = attribute.getDeclaringType();
         QueryBuilder qb = createQueryBuilder();
         qb.keyword(ALTER, TABLE).tableName(type.getName());
@@ -271,7 +291,7 @@ public class SchemaModifier implements ConnectionProvider {
             }
         } else {
             qb.keyword(ADD, COLUMN);
-            createColumn(qb, attribute);
+            createColumn(qb, attribute, inlineUnique);
         }
         executeSql(connection, qb);
     }
@@ -360,12 +380,25 @@ public class SchemaModifier implements ConnectionProvider {
         return Collections.unmodifiableSet(referencedTypes);
     }
 
+    /**
+     * Generates the create table for a specific type.
+     *
+     * @param type to generate the table statement
+     * @param mode creation mode
+     * @param <T> Type
+     * @return create table sql string
+     */
     public <T> String tableCreateStatement(Type<T> type, TableCreationMode mode) {
         String tableName = type.getName();
-        Set<Attribute<T, ?>> attributes = type.getAttributes();
 
         QueryBuilder qb = createQueryBuilder();
-        qb.keyword(CREATE, TABLE);
+        qb.keyword(CREATE);
+        if (type.getTableCreateAttributes() != null) {
+            for (String attribute : type.getTableCreateAttributes()) {
+                qb.append(attribute, true);
+            }
+        }
+        qb.keyword(TABLE);
         if (mode == TableCreationMode.CREATE_NOT_EXISTS) {
             qb.keyword(IF, NOT, EXISTS);
         }
@@ -389,6 +422,7 @@ public class SchemaModifier implements ConnectionProvider {
             }
         };
 
+        Set<Attribute<T, ?>> attributes = type.getAttributes();
         for (Attribute attribute : attributes) {
             if (filter.test(attribute)) {
                 if (index > 0) {
@@ -437,8 +471,10 @@ public class SchemaModifier implements ConnectionProvider {
         final Attribute referencedAttribute;
         if (attribute.getReferencedAttribute() != null) {
             referencedAttribute = attribute.getReferencedAttribute().get();
-        } else {
+        } else if (!referenced.getKeyAttributes().isEmpty()) {
             referencedAttribute = referenced.getKeyAttributes().iterator().next();
+        } else {
+            referencedAttribute = null;
         }
 
         if (!forceInline && (!platform.supportsInlineForeignKeyReference() || !forCreateStatement)) {
@@ -509,6 +545,10 @@ public class SchemaModifier implements ConnectionProvider {
     }
 
     private void createColumn(QueryBuilder qb, Attribute<?,?> attribute) {
+        createColumn(qb, attribute, true);
+    }
+
+    private void createColumn(QueryBuilder qb, Attribute<?,?> attribute, boolean inlineUnique) {
 
         qb.attribute(attribute);
         FieldType fieldType = mapping.mapAttribute(attribute);
@@ -524,12 +564,10 @@ public class SchemaModifier implements ConnectionProvider {
                 GenericMapping genericMapping = (GenericMapping) mapping;
                 converter = genericMapping.converterForType(attribute.getClassType());
             }
-            boolean hasLength = fieldType.hasLength() ||
-                    (converter != null && converter.getPersistedSize() != null);
 
             if (attribute.getDefinition() != null && attribute.getDefinition().length() > 0) {
                 qb.append(attribute.getDefinition());
-            } else if (hasLength) {
+            } else if (fieldType.hasLength()) {
 
                 Integer length = attribute.getLength();
                 if (length == null && converter != null) {
@@ -586,9 +624,16 @@ public class SchemaModifier implements ConnectionProvider {
         if (!attribute.isNullable()) {
             qb.keyword(NOT, NULL);
         }
-        if (attribute.isUnique()) {
+        if (inlineUnique && attribute.isUnique()) {
             qb.keyword(UNIQUE);
         }
+    }
+
+    public void createIndex(Connection connection, Attribute<?,?> attribute, TableCreationMode mode) {
+        QueryBuilder qb = createQueryBuilder();
+        String name = getIndexDefaultName(attribute);
+        createIndex(qb, name, Collections.singleton(attribute), attribute.getDeclaringType(), mode);
+        executeSql(connection, qb);
     }
 
     private <T> void createIndexes(Connection connection, TableCreationMode mode, Type<T> type) {
@@ -600,7 +645,7 @@ public class SchemaModifier implements ConnectionProvider {
                 for(String indexName : names) {
                     if (indexName.isEmpty()) {
                         // if no name set create a default one
-                        indexName = attribute.getName() + "_index";
+                        indexName = getIndexDefaultName(attribute);
                     }
                     Set<Attribute<?, ?>> indexColumns = indexes.get(indexName);
                     if (indexColumns == null) {
@@ -617,9 +662,13 @@ public class SchemaModifier implements ConnectionProvider {
         }
     }
 
+    private String getIndexDefaultName(Attribute<?,?> attribute) {
+        return attribute.getDeclaringType().getName() + "_" + attribute.getName() + "_index";
+    }
+
     private void createIndex(QueryBuilder qb,
                              String indexName,
-                             Set<Attribute<?,?>> attributes,
+                             Set<? extends Attribute<?,?>> attributes,
                              Type<?> type, TableCreationMode mode) {
         qb.keyword(CREATE);
         if ((attributes.size() >= 1 && attributes.iterator().next().isUnique()) ||
